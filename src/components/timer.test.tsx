@@ -31,10 +31,12 @@ vi.mock('react-sounds', () => ({
 }));
 
 class WorkerMock {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onmessage: ((ev: any) => void) | null = null;
   postMessage = vi.fn();
   terminate = vi.fn();
 }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 global.Worker = WorkerMock as any;
 
 describe('Timer Component', () => {

@@ -1,10 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Helper to simulate the worker environment
 function createWorkerScope(workerScript: string) {
   const events: any[] = [];
   let intervalFn: any = null;
-  let intervalMs: number = 0;
   let intervalActive = false;
 
   // Mock self object
@@ -14,9 +16,8 @@ function createWorkerScope(workerScript: string) {
   };
 
   // Patch setInterval/clearInterval for test
-  global.setInterval = (fn: any, ms?: number, ...args: any[]): any => {
+  global.setInterval = (fn: any): any => {
     intervalFn = fn;
-    intervalMs = ms ?? 0;
     intervalActive = true;
     return {} as NodeJS.Timeout;
   };
