@@ -27,7 +27,6 @@ function createWorkerScope(workerScript: string) {
   };
 
   // Evaluate worker script in this context
-  // eslint-disable-next-line no-eval
   eval(workerScript);
 
   return {
@@ -57,8 +56,10 @@ describe('workerTimer.js', () => {
     workerScope.self.onmessage({ data: { command: 'start', interval: 100 } });
     // Simulate interval tick
     workerScope.triggerTick();
-    expect(workerScope.self.postMessage).toHaveBeenCalledWith('tick');
-    expect(workerScope.events).toContain('tick');
+    expect(workerScope.self.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'tick', timestamp: expect.any(Number) }),
+    );
+    expect(workerScope.events[0]).toEqual(expect.objectContaining({ type: 'tick' }));
   });
 
   it('stops interval on stop command', () => {
@@ -74,5 +75,11 @@ describe('workerTimer.js', () => {
     workerScope.self.onmessage({ data: { command: 'start', interval: 100 } });
     workerScope.triggerTick();
     expect(workerScope.self.postMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start with an invalid interval', () => {
+    workerScope.self.onmessage({ data: { command: 'start', interval: 0 } });
+    workerScope.triggerTick();
+    expect(workerScope.self.postMessage).not.toHaveBeenCalled();
   });
 });

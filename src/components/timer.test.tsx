@@ -30,11 +30,17 @@ vi.mock('react-sounds', () => ({
   playSound: vi.fn(),
 }));
 
+const workerInstances: WorkerMock[] = [];
+
 class WorkerMock {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onmessage: ((ev: any) => void) | null = null;
   postMessage = vi.fn();
   terminate = vi.fn();
+
+  constructor() {
+    workerInstances.push(this);
+  }
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 global.Worker = WorkerMock as any;
@@ -42,6 +48,7 @@ global.Worker = WorkerMock as any;
 describe('Timer Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    workerInstances.length = 0;
   });
 
   it('renders initial time and session', () => {
@@ -56,6 +63,12 @@ describe('Timer Component', () => {
     const startBtn = screen.getByRole('button', { name: /Start Focus/ });
     fireEvent.click(startBtn);
     expect(startBtn.textContent).toContain('Pause Focus');
+    expect(workerInstances[0].postMessage).toHaveBeenCalledWith({ command: 'start', interval: 1000 });
+  });
+
+  it('does not start the worker until the timer starts', () => {
+    render(<Timer />);
+    expect(workerInstances[0].postMessage).not.toHaveBeenCalledWith({ command: 'start', interval: 1000 });
   });
 
   it('pauses timer on button click when running', () => {
@@ -67,10 +80,10 @@ describe('Timer Component', () => {
   });
 
   it('restarts session when restart icon is clicked', () => {
-    render(<Timer />);
+    render(<Timer focusLength={10} />);
     const restartBtn = screen.getByLabelText('Restart Session');
     fireEvent.click(restartBtn);
-    expect(screen.getByText('25:00')).toBeInTheDocument();
+    expect(screen.getByText('00:10')).toBeInTheDocument();
     expect(screen.getByText(/Focus Sessions: 1\/4/)).toBeInTheDocument();
   });
 

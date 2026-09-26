@@ -29,6 +29,13 @@ const DEFAULT_FOCUS_SESSIONS = 4; // Number of focus sessions before a long brea
 const DEFAULT_FOCUS_LENGTH = 25 * 60; // 25 minutes in seconds
 const DEFAULT_SHORT_BREAK_LENGTH = 5 * 60; // 5 minutes in seconds
 const DEFAULT_LONG_BREAK_LENGTH = 20 * 60; // 20 minutes in seconds
+const TICK_INTERVAL = 1000;
+
+const normalizeDuration = (duration: number, fallback: number) =>
+  Number.isFinite(duration) && duration >= 0 ? duration : fallback;
+
+const normalizeFocusSessions = (sessions: number) =>
+  Number.isFinite(sessions) && sessions > 0 ? Math.floor(sessions) : DEFAULT_FOCUS_SESSIONS;
 
 const Timer = ({
   focusLength = DEFAULT_FOCUS_LENGTH,
@@ -36,12 +43,17 @@ const Timer = ({
   longBreakLength = DEFAULT_LONG_BREAK_LENGTH,
   focusSessions = DEFAULT_FOCUS_SESSIONS,
 }: TimerProps) => {
-  const [time, setTime] = React.useState(focusLength);
+  const configuredFocusLength = normalizeDuration(focusLength, DEFAULT_FOCUS_LENGTH);
+  const configuredShortBreakLength = normalizeDuration(shortBreakLength, DEFAULT_SHORT_BREAK_LENGTH);
+  const configuredLongBreakLength = normalizeDuration(longBreakLength, DEFAULT_LONG_BREAK_LENGTH);
+  const configuredFocusSessions = normalizeFocusSessions(focusSessions);
+  const [time, setTime] = React.useState(configuredFocusLength);
   const [timerState, setTimerState] = React.useState(TimerState.Stopped);
   const [sessionState, setSessionState] = React.useState(SessionState.Focus);
   const [focusCount, setFocusCount] = React.useState(1);
   const workerRef = useRef<Worker | null>(null);
   const timerStateRef = useRef(timerState);
+  const deadlineRef = useRef<number | null>(null);
 
   useEffect(() => {
     timerStateRef.current = timerState;
@@ -52,52 +64,75 @@ const Timer = ({
 
     workerRef.current.onmessage = () => {
       if (timerStateRef.current === TimerState.Running) {
-        setTime((prevTime) => {
-          if (prevTime <= 0) {
-            return 0; // Prevent negative time
-          }
-          return prevTime - 1;
-        });
+        const deadline = deadlineRef.current;
+        if (deadline !== null) {
+          setTime(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+        }
       }
     };
-
-    workerRef.current.postMessage({ command: 'start', interval: 1000 });
 
     return () => {
       workerRef.current?.postMessage({ command: 'stop' });
       workerRef.current?.terminate();
+      workerRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    if (sessionState === SessionState.Focus && timerState === TimerState.Running && time <= 0) {
-      stopTimer();
-      setTimerState(TimerState.Stopped);
+    if (timerState !== TimerState.Running || time > 0) {
+      return;
+    }
+
+    timerStateRef.current = TimerState.Stopped;
+    workerRef.current?.postMessage({ command: 'stop' });
+    deadlineRef.current = null;
+    setTimerState(TimerState.Stopped);
+
+    if (sessionState === SessionState.Focus) {
       playSound(FOCUS_COMPLETE_SOUND);
-      if (focusCount >= focusSessions) {
+      const nextFocusCount = focusCount >= configuredFocusSessions ? 1 : focusCount + 1;
+      if (focusCount >= configuredFocusSessions) {
         setSessionState(SessionState.LongBreak);
-        setTime(longBreakLength);
-        setFocusCount(0); // Reset focus count after long break
+        setTime(configuredLongBreakLength);
       } else {
         setSessionState(SessionState.ShortBreak);
-        setTime(shortBreakLength);
+        setTime(configuredShortBreakLength);
       }
-      setFocusCount((prevCount) => prevCount + 1);
-    } else if (sessionState === SessionState.ShortBreak && timerState === TimerState.Running && time <= 0) {
-      setTime(focusLength);
-      stopTimer();
-      setTimerState(TimerState.Stopped);
+      setFocusCount(nextFocusCount);
+    } else if (sessionState === SessionState.ShortBreak) {
+      setTime(configuredFocusLength);
       setSessionState(SessionState.Focus);
       playSound(SHORT_BREAK_COMPLETE_SOUND);
-    } else if (sessionState === SessionState.LongBreak && timerState === TimerState.Running && time <= 0) {
-      setTime(focusLength);
-      stopTimer();
-      setTimerState(TimerState.Stopped);
+    } else {
+      setTime(configuredFocusLength);
       setSessionState(SessionState.Focus);
       playSound(SHORT_BREAK_COMPLETE_SOUND);
       setFocusCount(1);
     }
-  }, [time, timerState]);
+  }, [
+    configuredFocusLength,
+    configuredFocusSessions,
+    configuredLongBreakLength,
+    configuredShortBreakLength,
+    focusCount,
+    sessionState,
+    time,
+    timerState,
+  ]);
+
+  useEffect(() => {
+    if (timerState !== TimerState.Stopped) {
+      return;
+    }
+
+    const sessionLength =
+      sessionState === SessionState.Focus
+        ? configuredFocusLength
+        : sessionState === SessionState.ShortBreak
+          ? configuredShortBreakLength
+          : configuredLongBreakLength;
+    setTime(sessionLength);
+  }, [configuredFocusLength, configuredLongBreakLength, configuredShortBreakLength, sessionState, timerState]);
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
@@ -106,23 +141,32 @@ const Timer = ({
   };
 
   const startTimer = () => {
+    deadlineRef.current = Date.now() + time * 1000;
+    timerStateRef.current = TimerState.Running;
     setTimerState(TimerState.Running);
-    workerRef.current?.postMessage({ command: 'start', interval: 1000 });
+    workerRef.current?.postMessage({ command: 'start', interval: TICK_INTERVAL });
   };
 
   const pauseTimer = () => {
+    if (deadlineRef.current !== null) {
+      setTime(Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000)));
+    }
+    deadlineRef.current = null;
+    timerStateRef.current = TimerState.Paused;
     setTimerState(TimerState.Paused);
     workerRef.current?.postMessage({ command: 'stop' });
   };
 
   const stopTimer = () => {
+    deadlineRef.current = null;
+    timerStateRef.current = TimerState.Stopped;
     setTimerState(TimerState.Stopped);
     workerRef.current?.postMessage({ command: 'stop' });
   };
 
   const restartSession = () => {
     stopTimer();
-    setTime(DEFAULT_FOCUS_LENGTH);
+    setTime(configuredFocusLength);
     setFocusCount(1);
     setSessionState(SessionState.Focus);
     setTimerState(TimerState.Stopped);
@@ -131,35 +175,29 @@ const Timer = ({
   const skipToNext = () => {
     stopTimer();
     if (sessionState === SessionState.Focus) {
-      setTimerState(TimerState.Stopped);
-      if (focusCount >= focusSessions) {
+      if (focusCount >= configuredFocusSessions) {
         setSessionState(SessionState.LongBreak);
-        setTime(longBreakLength);
+        setTime(configuredLongBreakLength);
       } else {
         setSessionState(SessionState.ShortBreak);
-        setTime(shortBreakLength);
+        setTime(configuredShortBreakLength);
       }
     } else if (sessionState === SessionState.ShortBreak || sessionState === SessionState.LongBreak) {
-      setTimerState(TimerState.Stopped);
       setSessionState(SessionState.Focus);
-      setTime(focusLength);
+      setTime(configuredFocusLength);
       setFocusCount(sessionState === SessionState.LongBreak ? 1 : focusCount + 1);
     }
   };
 
   const handleTimerClick = () => {
     if (timerState === TimerState.Stopped) {
-      setTimerState(TimerState.Running);
       startTimer();
     } else if (timerState === TimerState.Running) {
-      setTimerState(TimerState.Paused);
       pauseTimer();
     } else if (timerState === TimerState.Paused) {
-      setTimerState(TimerState.Running);
       startTimer();
     } else {
-      setTimerState(TimerState.Stopped);
-      pauseTimer();
+      stopTimer();
     }
   };
 
@@ -178,9 +216,12 @@ const Timer = ({
 
   return (
     <div className='rounded-lg p-4  flex justify-center items-center flex-col border border-gray-300 '>
-      <p className='text-gray-700 text-4xl font-semibold'>{formatTime(time)}</p>
+      <p className='text-gray-700 text-4xl font-semibold' role='timer' aria-live='off'>
+        {formatTime(time)}
+      </p>
       <div className='flex items-center justify-between mt-4'>
-        <div
+        <button
+          type='button'
           className='flex items-center cursor-pointer mr-4'
           title='Restart Session'
           onClick={restartSession}
@@ -195,13 +236,14 @@ const Timer = ({
               d='M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 0 0-3.7-3.7 48.678 48.678 0 0 0-7.324 0 4.006 4.006 0 0 0-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 0 0 3.7 3.7 48.656 48.656 0 0 0 7.324 0 4.006 4.006 0 0 0 3.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3-3 3'
             />
           </svg>
-        </div>
+        </button>
 
         <button onClick={handleTimerClick} className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600'>
           {getButtonText()}
         </button>
 
-        <div
+        <button
+          type='button'
           className='flex items-center cursor-pointer ml-4'
           title={
             [SessionState.ShortBreak, SessionState.LongBreak].includes(sessionState)
@@ -227,10 +269,10 @@ const Timer = ({
               d='M8.25 9V5.25A2.25 2.25 0 0 1 10.5 3h6a2.25 2.25 0 0 1 2.25 2.25v13.5A2.25 2.25 0 0 1 16.5 21h-6a2.25 2.25 0 0 1-2.25-2.25V15M12 9l3 3m0 0-3 3m3-3H2.25'
             />
           </svg>
-        </div>
+        </button>
       </div>
       <div className='mt-4 text-gray-600'>
-        {sessionState === SessionState.Focus && `Focus Sessions: ${focusCount}/${focusSessions}`}
+        {sessionState === SessionState.Focus && `Focus Sessions: ${focusCount}/${configuredFocusSessions}`}
         {sessionState === SessionState.ShortBreak && 'Short Break'}
         {sessionState === SessionState.LongBreak && 'Long Break'}
       </div>
