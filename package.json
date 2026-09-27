@@ -11,7 +11,7 @@
   "dependencies": {
     "@heroicons/react": "^2.2.0",
     "howler": "^2.2.4",
-    "next": "15.3.4",
+    "next": "^15.5.25",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-sounds": "^1.0.25"
@@ -26,7 +26,7 @@
     "@types/react-dom": "^19",
     "@vitest/ui": "^3.2.4",
     "eslint": "^9",
-    "eslint-config-next": "15.3.4",
+    "eslint-config-next": "^15.5.25",
     "jsdom": "^26.1.0",
     "tailwindcss": "^4",
     "typescript": "^5",
