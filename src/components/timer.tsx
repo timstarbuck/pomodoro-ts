@@ -215,8 +215,8 @@ const Timer = ({
   };
 
   return (
-    <div className='rounded-lg p-4  flex justify-center items-center flex-col border border-gray-300 '>
-      <p className='text-gray-700 text-4xl font-semibold' role='timer' aria-live='off'>
+    <div className='rounded-lg p-4 flex justify-center items-center flex-col border border-border bg-surface'>
+      <p className='text-foreground text-4xl font-semibold' role='timer' aria-live='off'>
         {formatTime(time)}
       </p>
       <div className='flex items-center justify-between mt-4'>
@@ -238,7 +238,10 @@ const Timer = ({
           </svg>
         </button>
 
-        <button onClick={handleTimerClick} className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600'>
+        <button
+          onClick={handleTimerClick}
+          className='bg-primary text-primary-foreground px-4 py-2 rounded hover:bg-primary-hover'
+        >
           {getButtonText()}
         </button>
 
@@ -271,7 +274,7 @@ const Timer = ({
           </svg>
         </button>
       </div>
-      <div className='mt-4 text-gray-600'>
+      <div className='mt-4 text-accent'>
         {sessionState === SessionState.Focus && `Focus Sessions: ${focusCount}/${configuredFocusSessions}`}
         {sessionState === SessionState.ShortBreak && 'Short Break'}
         {sessionState === SessionState.LongBreak && 'Long Break'}
