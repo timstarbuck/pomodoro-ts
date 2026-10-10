@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { playSound } from 'react-sounds';
+import { notifyWhenPageInactive, requestTimerNotificationPermission } from './notifications';
 
 interface TimerProps {
   focusLength?: number;
@@ -24,6 +25,7 @@ enum TimerState {
 
 const FOCUS_COMPLETE_SOUND = 'ui/success_chime';
 const SHORT_BREAK_COMPLETE_SOUND = 'ui/success_bling';
+const NOTIFICATION_TITLE = 'Pomodoro Timer';
 
 const DEFAULT_FOCUS_SESSIONS = 4; // Number of focus sessions before a long break
 const DEFAULT_FOCUS_LENGTH = 25 * 60; // 25 minutes in seconds
@@ -51,6 +53,9 @@ const Timer = ({
   const [timerState, setTimerState] = React.useState(TimerState.Stopped);
   const [sessionState, setSessionState] = React.useState(SessionState.Focus);
   const [focusCount, setFocusCount] = React.useState(1);
+  const [notificationStatus, setNotificationStatus] = React.useState<
+    'disabled' | 'enabled' | 'unsupported' | 'denied' | 'default' | 'error'
+  >('disabled');
   const workerRef = useRef<Worker | null>(null);
   const timerStateRef = useRef(timerState);
   const deadlineRef = useRef<number | null>(null);
@@ -88,6 +93,13 @@ const Timer = ({
     deadlineRef.current = null;
     setTimerState(TimerState.Stopped);
 
+    if (notificationStatus === 'enabled') {
+      const result = notifyWhenPageInactive(NOTIFICATION_TITLE, `${sessionState} session complete.`);
+      if (result === 'unsupported' || result === 'denied' || result === 'error') {
+        setNotificationStatus(result);
+      }
+    }
+
     if (sessionState === SessionState.Focus) {
       playSound(FOCUS_COMPLETE_SOUND);
       const nextFocusCount = focusCount >= configuredFocusSessions ? 1 : focusCount + 1;
@@ -115,6 +127,7 @@ const Timer = ({
     configuredLongBreakLength,
     configuredShortBreakLength,
     focusCount,
+    notificationStatus,
     sessionState,
     time,
     timerState,
@@ -186,6 +199,21 @@ const Timer = ({
       setSessionState(SessionState.Focus);
       setTime(configuredFocusLength);
       setFocusCount(sessionState === SessionState.LongBreak ? 1 : focusCount + 1);
+    }
+  };
+
+  const toggleNotifications = async () => {
+    if (notificationStatus === 'enabled') {
+      setNotificationStatus('disabled');
+      return;
+    }
+
+    try {
+      const permission = await requestTimerNotificationPermission();
+      setNotificationStatus(permission === 'granted' ? 'enabled' : permission);
+    } catch (error) {
+      console.error('Unable to request timer notification permission.', error);
+      setNotificationStatus('error');
     }
   };
 
@@ -273,6 +301,36 @@ const Timer = ({
             />
           </svg>
         </button>
+      </div>
+      <div className='mt-3 flex flex-col items-center'>
+        <button
+          type='button'
+          className='text-sm text-accent underline'
+          aria-pressed={notificationStatus === 'enabled'}
+          onClick={() => void toggleNotifications()}
+        >
+          {notificationStatus === 'enabled' ? 'Disable notifications' : 'Enable notifications'}
+        </button>
+        {notificationStatus === 'unsupported' && (
+          <p role='status' className='mt-1 text-sm text-accent'>
+            Notifications are not supported by this browser.
+          </p>
+        )}
+        {notificationStatus === 'denied' && (
+          <p role='status' className='mt-1 text-sm text-accent'>
+            Notifications are blocked. Change your browser permission to enable them.
+          </p>
+        )}
+        {notificationStatus === 'default' && (
+          <p role='status' className='mt-1 text-sm text-accent'>
+            Notifications were not enabled. Allow them in your browser permissions to use this feature.
+          </p>
+        )}
+        {notificationStatus === 'error' && (
+          <p role='status' className='mt-1 text-sm text-accent'>
+            Unable to enable notifications.
+          </p>
+        )}
       </div>
       <div className='mt-4 text-accent'>
         {sessionState === SessionState.Focus && `Focus Sessions: ${focusCount}/${configuredFocusSessions}`}

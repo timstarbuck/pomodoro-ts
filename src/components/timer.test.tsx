@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, fireEvent, screen } from '@testing-library/react';
 import Timer, { SessionState } from './timer';
@@ -31,6 +31,19 @@ vi.mock('react-sounds', () => ({
 }));
 
 const workerInstances: WorkerMock[] = [];
+const notifications: Array<{ title: string; options?: NotificationOptions }> = [];
+
+class NotificationMock {
+  static permission: NotificationPermission = 'default';
+  static requestPermission = vi.fn<() => Promise<NotificationPermission>>();
+
+  constructor(
+    public title: string,
+    public options?: NotificationOptions,
+  ) {
+    notifications.push({ title, options });
+  }
+}
 
 class WorkerMock {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,6 +62,17 @@ describe('Timer Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     workerInstances.length = 0;
+    notifications.length = 0;
+    NotificationMock.permission = 'default';
+    NotificationMock.requestPermission.mockReset();
+    vi.stubGlobal('Notification', NotificationMock);
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it('renders initial time and session', () => {
@@ -105,5 +129,79 @@ describe('Timer Component', () => {
     expect(btn?.textContent).toContain('Pause Focus');
     if (btn) fireEvent.click(btn);
     expect(btn?.textContent).toContain('Resume Focus');
+  });
+
+  it('enables notifications only after the user grants permission', async () => {
+    NotificationMock.requestPermission.mockResolvedValue('granted');
+    render(<Timer />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable notifications' }));
+
+    expect(await screen.findByRole('button', { name: 'Disable notifications' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(NotificationMock.requestPermission).toHaveBeenCalledOnce();
+  });
+
+  it('shows notification capability and permission errors to the user', async () => {
+    vi.stubGlobal('Notification', undefined);
+    const { unmount } = render(<Timer />);
+    fireEvent.click(screen.getByRole('button', { name: 'Enable notifications' }));
+    expect(await screen.findByText('Notifications are not supported by this browser.')).toBeInTheDocument();
+    unmount();
+
+    vi.stubGlobal('Notification', NotificationMock);
+    NotificationMock.requestPermission.mockResolvedValue('denied');
+    render(<Timer />);
+    fireEvent.click(screen.getByRole('button', { name: 'Enable notifications' }));
+    expect(
+      await screen.findByText('Notifications are blocked. Change your browser permission to enable them.'),
+    ).toBeInTheDocument();
+  });
+
+  it('notifies on natural completion only when the page is inactive', async () => {
+    NotificationMock.permission = 'granted';
+    NotificationMock.requestPermission.mockResolvedValue('granted');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+
+    render(<Timer focusLength={0} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Enable notifications' }));
+    await screen.findByRole('button', { name: 'Disable notifications' });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Focus' }));
+
+    expect(notifications).toEqual([
+      { title: 'Pomodoro Timer', options: { body: 'Focus session complete.' } },
+    ]);
+  });
+
+  it('notifies for a naturally completed break as well as a focus session', async () => {
+    NotificationMock.permission = 'granted';
+    NotificationMock.requestPermission.mockResolvedValue('granted');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+
+    render(<Timer focusLength={0} shortBreakLength={0} focusSessions={2} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Enable notifications' }));
+    await screen.findByRole('button', { name: 'Disable notifications' });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Focus' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start Short Break' }));
+
+    expect(notifications.map(({ options }) => options?.body)).toEqual([
+      'Focus session complete.',
+      'Short Break session complete.',
+    ]);
+  });
+
+  it('does not notify for a session completed while the page is focused', async () => {
+    NotificationMock.permission = 'granted';
+    NotificationMock.requestPermission.mockResolvedValue('granted');
+    render(<Timer focusLength={0} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Enable notifications' }));
+    await screen.findByRole('button', { name: 'Disable notifications' });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Focus' }));
+
+    expect(notifications).toHaveLength(0);
   });
 });
